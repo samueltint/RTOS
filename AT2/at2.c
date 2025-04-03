@@ -24,6 +24,7 @@
 #include <sys/stat.h>
 #include <semaphore.h>
 #include <sys/time.h>
+#include <sys/mman.h>
 
 /* to be used for your memory allocation, write/read. man mmsp */
 #define SHARED_MEM_NAME "/my_shared_memory"
@@ -93,14 +94,13 @@ int main(int argc, char const *argv[])
   pthread_join(tid[1], NULL);
   pthread_join(tid[2], NULL);
 
-
   return 0;
 }
 
 void initializeData(ThreadParams *params)
 {
   int result;
-  
+
   // Initialize Sempahores
   if (sem_init(&(params->sem_A), 0, 1) != 0)
   { // Set up Sem for thread A
@@ -123,6 +123,9 @@ void initializeData(ThreadParams *params)
 
   // TODO: add your code
 
+  shm_fd = shm_open(SHARED_MEM_NAME, O_CREAT | O_RDWR, 0666);
+  ftruncate(shm_fd, SHARED_MEM_SIZE);
+
   result = pipe(params->pipeFile);
   if (result < 0)
   {
@@ -130,15 +133,14 @@ void initializeData(ThreadParams *params)
     exit(1);
   }
 
-
   return;
 }
 
 void *ThreadA(void *params)
 {
   // TODO: add your code
-  ThreadParams *tparams = (ThreadParams*)params;
-  char c[1000];
+  ThreadParams *tparams = (ThreadParams *)params;
+  char item[1000];
   FILE *fptr;
   int sig;
   char check[1000] = "end_header";
@@ -156,13 +158,14 @@ void *ThreadA(void *params)
 
   sig = 0;
 
-  while (fgets(c, sizeof(c), fptr) != NULL)
+  while (fgets(item, sizeof(item), fptr) != NULL)
   {
-    result= write(tparams->pipeFile[1], c, 1);
-    if (result!=1){ 
-      perror ("failed to write to pipe"); 
-      exit (2);
-	  }
+    result = write(tparams->pipeFile[1], item, strlen(item));
+    if (result <= 0)
+    {
+      perror("failed to write to pipe");
+      exit(2);
+    }
   }
 
   fclose(fptr);
@@ -171,25 +174,19 @@ void *ThreadA(void *params)
 }
 
 void *ThreadB(void *params)
-{  
-  
-  ThreadParams *tparams = (ThreadParams*)params;
-  buffer_item item[100];
-  int result;
+{
 
-  printf ("In reading thread\n");
-  while(1){
-    char c;
+  ThreadParams *tparams = (ThreadParams *)params;
+  char item[1000];
+  int bytesRead;
+  void *ptr;
 
-    result = read(tparams->pipeFile[0], item, sizeof(item));
+  ptr = mmap(0, SHARED_MEM_SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
 
-    
-    if(c !='\0')	{
-      printf ("Reader: %c\n", c);
-    } else {
-      printf("reading pipe has completed\n");
-      exit (5);
-    }
+  while ((bytesRead = read(tparams->pipeFile[0], item, sizeof(item) - 1)) > 0)
+  {
+    item[bytesRead] = '\0';
+    sprintf(ptr, "%s", item);
   }
 
   printf("Thread B: sum = %d\n", sum);
@@ -198,6 +195,27 @@ void *ThreadB(void *params)
 void *ThreadC(void *params)
 {
   // TODO: add your code
+  ThreadParams *tparams = (ThreadParams *)params;
+  char item[1000];
+  void *ptr;
+
+  ptr = mmap(0, SHARED_MEM_SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
+
+  char *start = (char *)ptr;
+  char *end;
+
+  while ((end = strchr(start, '\n')) != NULL)
+  {
+    *end = '\0';
+    if (strcmp(start, "end_header") == 0)
+    {
+      printf("Found end_header\n");
+      break; 
+    }
+
+    printf("C: %s\n", start);
+    start = end + 1;
+  }
 
   printf("Thread C: Final sum = %d\n", sum);
 }
