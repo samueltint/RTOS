@@ -25,6 +25,7 @@
 #include <semaphore.h>
 #include <sys/time.h>
 #include <sys/mman.h>
+#include <stdbool.h>
 
 /* to be used for your memory allocation, write/read. man mmsp */
 #define SHARED_MEM_NAME "/my_shared_memory"
@@ -42,6 +43,7 @@ typedef struct ThreadParams
 
 /* Global variables */
 int sum = 1;
+char eof_marker[4] = "EOF\n";
 
 pthread_attr_t attr;
 
@@ -81,16 +83,24 @@ int main(int argc, char const *argv[])
   initializeData(&params);
 
   // Create Threads
-  pthread_create(&(tid[0]), &attr, &ThreadA, (void *)(&params));
-
-  // TODO: add your code
-  pthread_create(&(tid[1]), &attr, &ThreadB, (void *)(&params));
-  pthread_create(&(tid[2]), &attr, &ThreadC, (void *)(&params));
+  if (pthread_create(&(tid[0]), &attr, &ThreadA, (void *)(&params)) != 0)
+  {
+    perror("failed create thread A\n");
+    exit(1);
+  }
+  if (pthread_create(&(tid[1]), &attr, &ThreadB, (void *)(&params)) != 0)
+  {
+    perror("failed create thread B\n");
+    exit(1);
+  }
+  if (pthread_create(&(tid[2]), &attr, &ThreadC, (void *)(&params)) != 0)
+  {
+    perror("failed create thread C\n");
+    exit(1);
+  }
 
   // Wait on threads to finish
   pthread_join(tid[0], NULL);
-
-  // TODO: add your code
   pthread_join(tid[1], NULL);
   pthread_join(tid[2], NULL);
 
@@ -121,8 +131,6 @@ void initializeData(ThreadParams *params)
   // Initialize thread attributes
   pthread_attr_init(&attr);
 
-  // TODO: add your code
-
   shm_fd = shm_open(SHARED_MEM_NAME, O_CREAT | O_RDWR, 0666);
   ftruncate(shm_fd, SHARED_MEM_SIZE);
 
@@ -138,84 +146,111 @@ void initializeData(ThreadParams *params)
 
 void *ThreadA(void *params)
 {
-  // TODO: add your code
   ThreadParams *tparams = (ThreadParams *)params;
   char item[1000];
   FILE *fptr;
-  int sig;
-  char check[1000] = "end_header";
   int result;
 
   if ((fptr = fopen(tparams->inputFile, "r")) == NULL)
   {
     printf("Error! opening file");
-    // Program exits if file pointer returns NULL.
     exit(1);
   }
 
-  // reads text until newline is encountered
-  printf("reading from the file:\n");
-
-  sig = 0;
-
   while (fgets(item, sizeof(item), fptr) != NULL)
   {
+    sem_wait(&(tparams->sem_A));
     result = write(tparams->pipeFile[1], item, strlen(item));
     if (result <= 0)
     {
       perror("failed to write to pipe");
       exit(2);
     }
+    sem_post(&(tparams->sem_B));
   }
 
-  fclose(fptr);
+  sem_wait(&(tparams->sem_A));
+  write(tparams->pipeFile[1], eof_marker, strlen(eof_marker));
+  sem_post(&(tparams->sem_B));
 
-  printf("Thread A: sum = %d\n", sum);
+  fclose(fptr);
 }
 
 void *ThreadB(void *params)
 {
-
   ThreadParams *tparams = (ThreadParams *)params;
   char item[1000];
   int bytesRead;
-  void *ptr;
+  void *memptr;
 
-  ptr = mmap(0, SHARED_MEM_SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
-
-  while ((bytesRead = read(tparams->pipeFile[0], item, sizeof(item) - 1)) > 0)
+  memptr = mmap(0, SHARED_MEM_SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  while (1)
   {
+    bytesRead = read(tparams->pipeFile[0], item, sizeof(item) - 1);
+    sem_wait(&(tparams->sem_B));
     item[bytesRead] = '\0';
-    sprintf(ptr, "%s", item);
-  }
 
-  printf("Thread B: sum = %d\n", sum);
+    if (strcmp(item, eof_marker) == 0)
+    {
+      sprintf(memptr, "%s", item);
+      sem_post(&(tparams->sem_C));
+      break;
+    }
+
+    sprintf(memptr, "%s", item);
+    sem_post(&(tparams->sem_C));
+  }
 }
 
 void *ThreadC(void *params)
 {
   // TODO: add your code
   ThreadParams *tparams = (ThreadParams *)params;
+  void *memptr;
   char item[1000];
-  void *ptr;
+  bool reading_content = false;
+  FILE *fptr;
 
-  ptr = mmap(0, SHARED_MEM_SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  memptr = mmap(0, SHARED_MEM_SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
 
-  char *start = (char *)ptr;
-  char *end;
-
-  while ((end = strchr(start, '\n')) != NULL)
+  if ((fptr = fopen(tparams->outputFile, "w")) == NULL)
   {
-    *end = '\0';
-    if (strcmp(start, "end_header") == 0)
-    {
-      printf("Found end_header\n");
-      break; 
-    }
-
-    printf("C: %s\n", start);
-    start = end + 1;
+    printf("Error! opening file");
+    exit(1);
   }
 
-  printf("Thread C: Final sum = %d\n", sum);
+  while (1)
+  {
+    sem_wait(&(tparams->sem_C));
+    strcpy(item, (char *)memptr);
+
+    if (strcmp(item, eof_marker) == 0)
+    {
+      break;
+    }
+
+    char *start = (char *)memptr;
+    char *end;
+
+    while ((end = strchr(start, '\n')) != NULL)
+    {
+      *end = '\0';
+      if (reading_content)
+      {
+        printf("%s\n", start);
+        fprintf(fptr, "%s\n", start);
+      }
+      else
+      {
+        if (strcmp(start, "end_header") == 0)
+        {
+          reading_content = true;
+        }
+      }
+      start = end + 1;
+    }
+    sem_post(&(tparams->sem_A));
+  }
+
+  exit(0);
 }
