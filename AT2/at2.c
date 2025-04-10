@@ -35,7 +35,7 @@
 typedef struct ThreadParams
 {
   int pipeFile[2];           // [0] for read and [1] for write. use pipe for data transfer from thread A to thread B
-  sem_t sem_A, sem_B, sem_C; // the semphore
+  // sem_t sem_A, sem_B, sem_C; // the semphore
   char message[255];
   char inputFile[100];  // input file name
   char outputFile[100]; // output file name
@@ -110,21 +110,21 @@ void initializeData(ThreadParams *params)
 {
   int result;
 
-  if (sem_init(&(params->sem_A), 0, 1) != 0)
-  {
-    perror("error for init threa A");
-    exit(1);
-  }
-  if (sem_init(&(params->sem_B), 0, 0) != 0)
-  { 
-    perror("error for init threa B");
-    exit(1);
-  }
-  if (sem_init(&(params->sem_C), 0, 0) != 0)
-  { 
-    perror("error for init threa C");
-    exit(1);
-  }
+  // if (sem_init(&(params->sem_A), 0, 1) != 0)
+  // {
+  //   perror("error for init threa A");
+  //   exit(1);
+  // }
+  // if (sem_init(&(params->sem_B), 0, 0) != 0)
+  // { 
+  //   perror("error for init threa B");
+  //   exit(1);
+  // }
+  // if (sem_init(&(params->sem_C), 0, 0) != 0)
+  // { 
+  //   perror("error for init threa C");
+  //   exit(1);
+  // }
 
   pthread_attr_init(&attr);
 
@@ -156,7 +156,7 @@ void *ThreadA(void *params)
 
   while (fgets(item, sizeof(item), fptr) != NULL)
   {
-    sem_wait(&(tparams->sem_A));
+    // sem_wait(&(tparams->sem_A));
     result = write(tparams->pipeFile[1], item, strlen(item));
     printf("[Thread A] Read from file and wrote to pipe: %s", item);
     if (result <= 0)
@@ -164,13 +164,13 @@ void *ThreadA(void *params)
       perror("failed to write to pipe");
       exit(2);
     }
-    sem_post(&(tparams->sem_B));
+    // sem_post(&(tparams->sem_B));
   }
 
-  sem_wait(&(tparams->sem_A));
+  // sem_wait(&(tparams->sem_A));
   write(tparams->pipeFile[1], eof_marker, strlen(eof_marker));
   printf("[Thread A] Wrote EOF to pipe\n");
-  sem_post(&(tparams->sem_B));
+  // sem_post(&(tparams->sem_B));
 
   fclose(fptr);
 }
@@ -192,7 +192,7 @@ void *ThreadB(void *params)
 
   while (1)
   {
-    sem_wait(&(tparams->sem_B));
+    // sem_wait(&(tparams->sem_B));
     bytesRead = read(tparams->pipeFile[0], item, sizeof(item) - 1);
     item[bytesRead] = '\0';
 
@@ -200,7 +200,7 @@ void *ThreadB(void *params)
     sprintf(memptr, "%s", item);
     printf("[Thread B] Wrote to shared memory: %s", (char *)memptr);
 
-    sem_post(&(tparams->sem_C));
+    // sem_post(&(tparams->sem_C));
 
     if (strcmp(item, eof_marker) == 0)
     {
@@ -233,7 +233,7 @@ void *ThreadC(void *params)
 
   while (1)
   {
-    sem_wait(&(tparams->sem_C));
+    // sem_wait(&(tparams->sem_C));
     strcpy(item, (char *)memptr);
 
     printf("[Thread C] Read from shared memory: %s", item);
@@ -269,7 +269,7 @@ void *ThreadC(void *params)
       }
       start = end + 1;
     }
-    sem_post(&(tparams->sem_A));
+    // sem_post(&(tparams->sem_A));
   }
 
   fclose(fptr);
