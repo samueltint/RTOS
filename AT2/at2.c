@@ -140,7 +140,7 @@ void initializeData(ThreadParams *params)
 
   return;
 }
-
+// Inside ThreadA
 void *ThreadA(void *params)
 {
   ThreadParams *tparams = (ThreadParams *)params;
@@ -150,7 +150,7 @@ void *ThreadA(void *params)
 
   if ((fptr = fopen(tparams->inputFile, "r")) == NULL)
   {
-    printf("Error! opening file");
+    printf("Error! opening input file\n");
     exit(1);
   }
 
@@ -158,6 +158,7 @@ void *ThreadA(void *params)
   {
     sem_wait(&(tparams->sem_A));
     result = write(tparams->pipeFile[1], item, strlen(item));
+    printf("[Thread A] Read from file and wrote to pipe: %s", item);
     if (result <= 0)
     {
       perror("failed to write to pipe");
@@ -168,11 +169,13 @@ void *ThreadA(void *params)
 
   sem_wait(&(tparams->sem_A));
   write(tparams->pipeFile[1], eof_marker, strlen(eof_marker));
+  printf("[Thread A] Wrote EOF to pipe\n");
   sem_post(&(tparams->sem_B));
 
   fclose(fptr);
 }
 
+// Inside ThreadB
 void *ThreadB(void *params)
 {
   ThreadParams *tparams = (ThreadParams *)params;
@@ -181,38 +184,50 @@ void *ThreadB(void *params)
   void *memptr;
 
   memptr = mmap(0, SHARED_MEM_SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  if (memptr == MAP_FAILED)
+  {
+    perror("mmap failed in Thread B");
+    exit(1);
+  }
+
   while (1)
   {
-    bytesRead = read(tparams->pipeFile[0], item, sizeof(item) - 1);
     sem_wait(&(tparams->sem_B));
+    bytesRead = read(tparams->pipeFile[0], item, sizeof(item) - 1);
     item[bytesRead] = '\0';
+
+    printf("[Thread B] Read from pipe: %s", item);
+    sprintf(memptr, "%s", item);
+    printf("[Thread B] Wrote to shared memory: %s", (char *)memptr);
+
+    sem_post(&(tparams->sem_C));
 
     if (strcmp(item, eof_marker) == 0)
     {
-      sprintf(memptr, "%s", item);
-      sem_post(&(tparams->sem_C));
       break;
     }
-
-    sprintf(memptr, "%s", item);
-    sem_post(&(tparams->sem_C));
   }
 }
 
+// Inside ThreadC
 void *ThreadC(void *params)
 {
-  // TODO: add your code
   ThreadParams *tparams = (ThreadParams *)params;
   void *memptr;
   char item[1000];
   bool reading_content = false;
   FILE *fptr;
 
-  memptr = mmap(0, SHARED_MEM_SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  memptr = mmap(0, SHARED_MEM_SIZE, PROT_READ, MAP_SHARED, shm_fd, 0);
+  if (memptr == MAP_FAILED)
+  {
+    perror("mmap failed in Thread C");
+    exit(1);
+  }
 
   if ((fptr = fopen(tparams->outputFile, "w")) == NULL)
   {
-    printf("Error! opening file");
+    printf("Error! opening output file\n");
     exit(1);
   }
 
@@ -221,12 +236,15 @@ void *ThreadC(void *params)
     sem_wait(&(tparams->sem_C));
     strcpy(item, (char *)memptr);
 
+    printf("[Thread C] Read from shared memory: %s", item);
+
     if (strcmp(item, eof_marker) == 0)
     {
+      printf("[Thread C] Received EOF marker. Exiting.\n");
       break;
     }
 
-    char *start = (char *)memptr;
+    char *start = item;
     char *end;
 
     while ((end = strchr(start, '\n')) != NULL)
@@ -234,7 +252,7 @@ void *ThreadC(void *params)
       *end = '\0';
       if (reading_content)
       {
-        printf("%s\n", start);
+        printf("[Thread C] Writing line to output: %s\n", start);
         fprintf(fptr, "%s\n", start);
       }
       else
@@ -242,6 +260,11 @@ void *ThreadC(void *params)
         if (strcmp(start, "end_header") == 0)
         {
           reading_content = true;
+          printf("[Thread C] Found end_header. Now writing content.\n");
+        }
+        else
+        {
+          printf("[Thread C] Skipping header line: %s\n", start);
         }
       }
       start = end + 1;
@@ -249,5 +272,6 @@ void *ThreadC(void *params)
     sem_post(&(tparams->sem_A));
   }
 
-  exit(0);
+  fclose(fptr);
+  return NULL;
 }
