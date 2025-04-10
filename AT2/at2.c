@@ -42,7 +42,6 @@ typedef struct ThreadParams
 } ThreadParams;
 
 /* Global variables */
-int sum = 1;
 char eof_marker[4] = "EOF\n";
 
 pthread_attr_t attr;
@@ -111,24 +110,22 @@ void initializeData(ThreadParams *params)
 {
   int result;
 
-  // Initialize Sempahores
   if (sem_init(&(params->sem_A), 0, 1) != 0)
-  { // Set up Sem for thread A
+  {
     perror("error for init threa A");
     exit(1);
   }
   if (sem_init(&(params->sem_B), 0, 0) != 0)
-  { // Set up Sem for thread B
+  { 
     perror("error for init threa B");
     exit(1);
   }
   if (sem_init(&(params->sem_C), 0, 0) != 0)
-  { // Set up Sem for thread C
+  { 
     perror("error for init threa C");
     exit(1);
   }
 
-  // Initialize thread attributes
   pthread_attr_init(&attr);
 
   shm_fd = shm_open(SHARED_MEM_NAME, O_CREAT | O_RDWR, 0666);
