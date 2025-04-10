@@ -196,10 +196,8 @@ void *ThreadB(void *params)
     bytesRead = read(tparams->pipeFile[0], item, sizeof(item) - 1);
     item[bytesRead] = '\0';
 
-    printf("[Thread B] Read from pipe: %s", item);
+    printf("[Thread B] Read from pipe and wrote to shared memory: %s", item);
     sprintf(memptr, "%s", item);
-    printf("[Thread B] Wrote to shared memory: %s", (char *)memptr);
-
     sem_post(&(tparams->sem_C));
 
     if (strcmp(item, eof_marker) == 0)
@@ -235,9 +233,6 @@ void *ThreadC(void *params)
   {
     sem_wait(&(tparams->sem_C));
     strcpy(item, (char *)memptr);
-
-    printf("[Thread C] Read from shared memory: %s", item);
-
     if (strcmp(item, eof_marker) == 0)
     {
       printf("[Thread C] Received EOF marker. Exiting.\n");
