@@ -116,12 +116,12 @@ void initializeData(ThreadParams *params)
     exit(1);
   }
   if (sem_init(&(params->sem_B), 0, 0) != 0)
-  { 
+  {
     perror("error for init threa B");
     exit(1);
   }
   if (sem_init(&(params->sem_C), 0, 0) != 0)
-  { 
+  {
     perror("error for init threa C");
     exit(1);
   }
@@ -180,7 +180,7 @@ void *ThreadB(void *params)
   int bytesRead;
   void *memptr;
 
-  memptr = mmap(0, SHARED_MEM_SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  memptr = mmap(0, SHARED_MEM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
   while (1)
   {
     bytesRead = read(tparams->pipeFile[0], item, sizeof(item) - 1);
@@ -189,7 +189,8 @@ void *ThreadB(void *params)
 
     if (strcmp(item, eof_marker) == 0)
     {
-      sprintf(memptr, "%s", item);
+      memset(memptr, 0, SHARED_MEM_SIZE);
+      snprintf(memptr, SHARED_MEM_SIZE, "%s", item);
       sem_post(&(tparams->sem_C));
       break;
     }
@@ -201,14 +202,13 @@ void *ThreadB(void *params)
 
 void *ThreadC(void *params)
 {
-  // TODO: add your code
   ThreadParams *tparams = (ThreadParams *)params;
   void *memptr;
   char item[1000];
   bool reading_content = false;
   FILE *fptr;
 
-  memptr = mmap(0, SHARED_MEM_SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
+  memptr = mmap(0, SHARED_MEM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
 
   if ((fptr = fopen(tparams->outputFile, "w")) == NULL)
   {
@@ -223,29 +223,20 @@ void *ThreadC(void *params)
 
     if (strcmp(item, eof_marker) == 0)
     {
+      sem_post(&(tparams->sem_A));
       break;
     }
 
-    char *start = (char *)memptr;
-    char *end;
-
-    while ((end = strchr(start, '\n')) != NULL)
+    if (reading_content)
     {
-      *end = '\0';
-      if (reading_content)
-      {
-        printf("%s\n", start);
-        fprintf(fptr, "%s\n", start);
-      }
-      else
-      {
-        if (strcmp(start, "end_header") == 0)
-        {
-          reading_content = true;
-        }
-      }
-      start = end + 1;
+      printf("%s", item);
+      fprintf(fptr, "%s", item);
     }
+    else if (strncmp(item, "end_header", 10) == 0)
+    {
+      reading_content = true;
+    }
+
     sem_post(&(tparams->sem_A));
   }
 
